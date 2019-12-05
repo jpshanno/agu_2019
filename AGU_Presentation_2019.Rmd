@@ -1,81 +1,850 @@
 ---
-title: Generate Reproducible & Live HTML and PDF Conference Posters Using RMarkdown
+title: Runoff and Stream Water Chemistry Responses to Simulated Emerald Ash Borer Invasion in Black Ash Wetlands in Northern Michigan
 author:
-  - name: Brent Thorne
+  - name: Joseph Shannon
     affil: 1
-    orcid: '0000-0002-1099-3857'
-  - name: Another G. Author
-    affil: 2
+    orcid: '0000-0002-0052-9962'
+  - name: Kathryn Hofmeister
+    affil: 1
+  - name: Matthew Van Grinsven
+    affil: 1, 2
+  - name: Randall Kolka
+    affil: 3
+  - name: Fengjing Liu
+    affil: 1
 affiliation:
   - num: 1
-    address: Department of Earth Science, Brock University
+    address: College of Forest Resources and Environmental Science, Michigan Technological University
   - num: 2
-    address: Department of Graphics and Layouts, University of Posters; Canada
-column_numbers: 2
-logoright_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
-logoleft_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
+    address: Department of Earth, Environmental, and Geographical Sciences, Northern Michigan University
+  - num: 3
+    address: US Forest Service, Northern Research Station
+column_numbers: 3
+poster_width: 48in
+poster_height: 36in
+body_textsize: 30pt
+title_textsize: 60pt
+author_textsize: 48pt
+affiliation_textsize: 36pt
+primary_colour: "#4094af"
+major_colour: "#306F83FF"
+sectitle_bgcol: "ffffff"
+sectitle_borderwidth: 0mm
+sectitle_textcol: "000000"
+sectitle_align: "left"
+# title_align: "left"
+titlebox_borderheight: 0mm
+major_textcol: "white"
+titlebox_borderwidth: 2%
+# logoright_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
+# logoleft_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
 output: 
-  posterdown::posterdown_html:
+  posterdown::posterdown_hybrid:
     self_contained: false
 # bibliography: packages.bib
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      error = FALSE)
+# Packages ----------------------------------------------------------------
+
+suppressPackageStartupMessages({library(agricolae)
+library(tidyverse)
+library(broom)
+library(emmeans)
+library(lubridate)
+library(jpshanno)
+library(here)
+library(vroom)
+# library(tydygraphs)
+# library(RcppRoll)
+library(ggridges)
+library(quantreg)
+library(patchwork)
+# library(tsibble)
+# library(zoo)
+library(ggstance)})
+
+
+# Define Functions --------------------------------------------------------
+
+scale_min_max <- 
+  function(x){
+    (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+  }
+
+plot_lims <- 
+  function(low, high){
+    1.1*c(min(low, 0), max(high, 0))
+  }
+
+significant_change <- 
+  function(groups, means){
+    
+    groups <- 
+      str_trim(groups)
+    
+    is_sign <- 
+      !any(str_detect(groups[1], str_split(groups[2], "")[[1]]),
+           str_detect(groups[2], str_split(groups[1], "")[[1]]))
+    
+    if(!is_sign) return(0)
+    sign(means[2] - means[1])
+  }
+
+# Built from vignette "Extending emmeans"
+recover_data.rq <- 
+  emmeans:::recover_data.lm
+
+emm_basis.rq <- 
+  function(object, trms, xlev, grid, ...){
+    # I was going to try this with the largest standard error method (BLB), but
+    # these vary each run from 0 - 3 significant results. Without more reading
+    # into the approach I am going to skip using a boot strap method, which leaves
+    # with 'ker'
+    rq_sum <- 
+      summary(object, 
+              covariance = TRUE,
+              se = "ker")
+    
+    m <- model.frame(trms, grid, na.action = na.pass, 
+                     xlev = xlev)
+    X <- model.matrix(trms, m, contrasts.arg = object$contrasts)
+    bhat <- coef(object)
+    Xmat <- model.matrix(trms, data = object$model)
+    V <- rq_sum[["cov"]] # Covariance structure
+    nbasis <- estimability::nonest.basis(Xmat)
+    dfargs <- list(df = rq_sum[["rdf"]])
+    dffun <- function(k, dfargs) dfargs$df
+    list(X = X, bhat = bhat, nbasis = nbasis, V=V, dffun = dffun, dfargs = dfargs)
+  }
+
+summarize_model <- 
+  function(pred = NULL, obs = NULL, model = NULL){
+    if(!is.null(model)){
+      pred <- 
+        fitted(model)
+      obs <- 
+        model$y
+    }
+    
+    res <- 
+      pred - obs
+    
+    rmse <- 
+      sqrt(mean(res^2, na.rm = TRUE))
+    
+    me <- 
+      median(res, na.rm = TRUE)
+    
+    rho <- 
+      cor(obs[!is.na(obs) & !is.na(pred)], pred[!is.na(obs) & !is.na(pred)], 
+          method = "spearman")
+    
+    r_squared <- 
+      cor(obs[!is.na(obs) & !is.na(pred)], pred[!is.na(obs) & !is.na(pred)])^2
+    
+    sprintf("RMSE = %1.2f\nMedian Error = %1.2f\nrho = %1.2f\nr2 = %1.2f", rmse, me, rho, r_squared)
+  }
+
+# Load Data ---------------------------------------------------------------
+
+samples <- 
+  read.csv(here("data", "paired_watershed_doc_tdn_concentrations.csv"),
+           stringsAsFactors = FALSE,
+           colClass = c("character", "character", "POSIXct", "numeric", 
+                        "numeric", "numeric", "character")) %>% 
+  mutate(source = str_extract(sample_location, "[A-Z]+"),
+         sample_location = str_extract(sample_location, "[0-9]"),
+         sample_location = paste(site, ifelse(is.na(sample_location), "FL", sample_location), sep = "-"),
+         sample_date = date(sample_time),
+         treatment_period = set_treatment_period(sample_date)) %>% 
+  filter(source %in% c("FL", "MW", "SW"),
+         doc_mg_L > 0,
+         tn_mg_L > 0) %>% 
+  group_by(sample_location, source) %>% 
+  mutate_at(vars(contains("mg_L")), 
+            ~ifelse(between(., 
+                            mean(., na.rm = TRUE) - qnorm(0.995)*sd(., na.rm = TRUE), 
+                            mean(., na.rm = TRUE) + qnorm(0.995)*sd(., na.rm = TRUE)), 
+                    ., 
+                    NA_real_)) %>% 
+  ungroup()
+
+wells <- 
+  vroom(here("data", "well_levels.csv"),
+        delim = ",",
+        col_select = c(site, sample_time, water_level_m),
+        col_types = cols(site = col_character(),
+                         sample_time = col_datetime(format = ""),
+                         water_level_m = col_double())) %>% 
+  filter(site %in% c("053", "113")) %>% 
+  mutate(water_level_mm = water_level_m * 1000) %>% 
+  select(-water_level_m)
+
+
+# Reshape Water Chemistry Data --------------------------------------------
+# There are some extreme outliers for DOC and TN, these are currently removed by
+# getting rid of data that falls outside of the 99% confidence interval for the
+# mean of the data by site. 
+
+mw <- 
+  samples %>%
+  filter(source == "MW") %>% 
+  select(site, sample_date, doc_mg_L_MW = doc_mg_L, tn_mg_L_MW = tn_mg_L, sample_location)
+
+
+sw <- 
+  samples %>%
+  filter(source == "SW") %>% 
+  select(site, sample_date, doc_mg_L_SW = doc_mg_L, tn_mg_L_SW = tn_mg_L, sample_location)
+
+fl <- 
+  samples %>%
+  filter(source == "FL") %>% 
+  select(site, sample_date, doc_mg_L_FL = doc_mg_L, tn_mg_L_FL = tn_mg_L)
+
+# Contains only samples with Wetland and Stream water samples on the same day
+wide_samples <- 
+  full_join(mw, sw, by = c("site", "sample_location", "sample_date")) %>% 
+  inner_join(fl, by = c("site", "sample_date")) %>% 
+  mutate(treatment_period = set_treatment_period(sample_date))
+
+# Contains all samples
+long_samples <- 
+  samples %>% 
+  select(site, treatment_period, sample_location, sample_date, source, doc_mg_L, tn_mg_L) %>%
+  pivot_longer(contains("mg_L"), 
+               values_to = "conc_mg_L", 
+               names_to = "analyte", 
+               names_pattern = "(doc|tn)_mg_L")
+
+
+# Scale Samples -----------------------------------------------------------
+
+# To remove the impact of this dual set we can either summarize data from the
+# each day to get a mean or median source water value, or we can scale the data.
+# In this analysis I scaled the data, which retains all of the observations.
+# Because I am looking at the relationship between the source water and
+# streamwater I think the relationship analysis will remain valid with the
+# scaling.
+
+# I attempted to back-transform the scaling prior to fitting the models (see
+# code below). I calculated emmeans and emmtrends for both approaches and 
+# compared the results to a regular quantile regression model for only 113 DOC
+# SW for both pre and post treatments
+# test_dat <-
+#     wide_samples %>% 
+#     filter(site == "113", treatment_period == "Post-treatment")
+# rq(doc_mg_L_FL ~ doc_mg_L_SW, data = test_dat, tau = 0.5)
+# The slopes for both approaches were the same, but the intercept for the post-modeling
+# back transform were much closer to the 'true' model. It would be worth revisitng 
+# to make sure there wasn't an error (as the model description is much easier if
+# it is in real space rather than scaled space).
+scaled_samples <-
+  wide_samples %>%
+  group_by(sample_location) %>%
+  mutate_at(vars(matches("mg_L_(MW|SW)")),
+            scale) %>%
+  rename_at(vars(matches("mg_L_(MW|SW)")),
+            str_replace,
+            "mg_L",
+            "scaled") %>%
+  ungroup()
+
+scale_parameters <-
+  wide_samples %>%
+  select(-matches("_FL")) %>%
+  group_by(site, sample_location) %>%
+  summarize_at(vars(matches("mg_L")),
+               .funs = list(center = ~attributes(scale(.))[[2]],
+                            scale = ~attributes(scale(.))[[3]],
+                            n_samples = ~sum(!is.na(.)))) %>%
+  pivot_longer(contains("mg"),
+               names_to = c("analyte", "source", "parameter"),
+               names_pattern = "(doc|tn)_mg_L_(MW|SW|FL)_(center|scale|n_samples)",
+               values_to = "value") %>%
+  pivot_wider(names_from = parameter,
+              values_from = value) %>%
+  group_by(site, source, analyte) %>%
+  summarize(center_x = sum(center * n_samples / sum(n_samples)),
+            scale_x = sqrt(sum(scale^2 * n_samples / sum(n_samples)))) %>%
+  ungroup()
+```
+#  Major Finding
+Stream water dissolved organic carbon concentrations increased following
+disturbance. Changes were driven by altered surface water concentrations and
+increased water levels.
+
+# Basic Sections
+
+<hr width = 80%>
+## Introduction
+
+Black ash is a dominant canopy species in northern forested wetlands that is
+threatened by Emerald Ash Borer (EAB), which is continuing to spread into areas
+where black ash is prominent and loss of ash has been shown to affect wetland
+water levels. No work has examined water quality changes following simulation or
+how those changes are telegraphed downstream.
+
+## Methods
+
+A paired watershed approach has been implemented on the Ottawa National Forest
+in western Michigan (Control: 1.1 ha, 503 m a.s.l.; Treatment: 0.8 ha, 476 m
+a.s.l.). Streamflow monitored in a 6” Parshall flume with a Solinst Levellogger
+Edge and dissolved organic carbon (DOC) and total dissolved nitrogen (TDN) were
+collected by grab and automated sampling and processed on a Shimadzu Total
+Organic Analyzer After 2 years of calibration all ash ≥ 1” dbh were cut and left
+on site in one watershed in March 2015.
+
+## Summary Results
+
+During the post-treatment period increased wetland water levels in the Treatment
+watershed led to more continuous surface water runoff, resulting in higher
+baseflow. This is supported by the wetland surface water model at the Treatment
+site, which was the best performing post-treatment predictor of stream DOC. Over
+that same period in the Control watershed baseflow decreased and wetland soil
+water was the best predictor of stream water DOC.
+
+## Future Results
+
+Incorporate seasonality as these systems are heavily influenced by snowfall.
+Analyze anion (Cl-, SO42-) concentrations and flourescence excitation emission
+matrices to improve source water separation and understand biogeochemical
+processing
+
+<hr width = 80%>
+<br>
+<br>
+
+# Content
+<br>
+```{r flume-doc-plot, fig.cap='Great figure!', fig.height=10, fig.width=15, warning=FALSE, error=FALSE}
+# Pre-Post Flume Models ---------------------------------------------------
+
+flumes_wide <- 
+  full_join(fl %>% 
+              filter(site == "113") %>%
+              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
+              rename(doc_113 = doc_mg_L_FL,
+                     tn_113 = tn_mg_L_FL), 
+            fl %>% 
+              filter(site == "053") %>% 
+              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
+              rename(doc_053 = doc_mg_L_FL,
+                     tn_053 = tn_mg_L_FL), 
+            by = "sample_date") %>% 
+  mutate(treatment_period = set_treatment_period(sample_date))
+
+pre_fl <- 
+  flumes_wide %>% 
+  filter(treatment_period == "Pre-treatment")
+
+pre_fl_mods <- 
+  map(c("doc", "tn"),
+      function(analyte){
+        x <- paste0(analyte, "_113")
+        y <- paste0(analyte, "_053")
+        form <-
+          as.formula(paste(y, "~", x))
+        
+        mod <- 
+          rq(form,
+             data = pre_fl,
+             tau = 0.5)
+        
+        mod}) %>% 
+  set_names(c("doc", "tn"))
+
+flumes_wide <- 
+  flumes_wide %>% 
+  mutate(doc_fitted = predict(pre_fl_mods[["doc"]], newdata = .),
+         tn_fitted = predict(pre_fl_mods[["tn"]], newdata = .),
+         doc_resid = doc_fitted - doc_053,
+         tn_resid = tn_fitted - tn_053)
+
+flume_resid <- 
+  flumes_wide %>% 
+  select(sample_date, treatment_period, matches("_resid")) %>% 
+  pivot_longer(matches("_resid"), 
+               names_to = "analyte", 
+               names_pattern = "(doc|tn)",
+               values_to = "resid_mg_L") %>% 
+  mutate(analyte_full = ifelse(str_detect(analyte, "doc"), "Dissolved Organic Carbon", "Total Dissolved Nitrogen"))
+
+resid_se <- 
+  flume_resid %>% 
+  group_by(treatment_period, analyte) %>%
+  filter(!is.na(resid_mg_L)) %>% 
+  summarize(x = median(resid_mg_L),
+            se = sd(resid_mg_L)/sqrt(n()),
+            xmin = x - 1.96*se,
+            xmax = x + 1.96*se,
+            n_samples = n()) %>% 
+  filter(analyte == "doc") %>% 
+  ungroup()
+
+# resid_se %>% 
+#   summarize(median_diff = diff(rev(x)), 
+#             se = combine_se(x, se, n_samples), 
+#             ul = median_diff + se, 
+#             ll = median_diff - se)
+
+labels <- 
+  data.frame(x = c(-3, 2.85),
+             y = c(0.52, 0.75),
+             label = c("Pre-treatment", "Post-treatment"),
+             hjust = c(1, 0))
+
+# MORE DOC LEAVING THAN EXPECTED POST-TREATMENT. If the residuals are negative
+# then the model is UNDERPREDICTING the observed values.
+ggplot(data = flume_resid %>% filter(analyte == "doc")) +
+  geom_density_ridges(aes(x = -resid_mg_L,
+                          fill = treatment_period,
+                          y = 0, 
+                          height = ..scaled..), 
+                      scale = 1, 
+                      stat = "density",
+                      show.legend = FALSE) +
+  scale_fill_manual(name = NULL, 
+                    values = c("#d55e00CC", "#3085c7CC")) +
+  scale_y_continuous(expand = c(0, 0, 0.1, 0)) +
+  labs(x = expression(atop(Observed~minus~Predicted~Dissolved~Organic~Carbon, "in"~Stream~Water~(mg~L^{-1}))),
+       y = "Density (Scaled to 1)") +
+  geom_pointrangeh(data = resid_se,
+                   aes(y = 1.1, 
+                       x = -x,
+                       xmin = -xmin,
+                       xmax = -xmax)) +
+  geom_errorbarh(data = resid_se,
+                 aes(xmin = -min(x),
+                     xmax = -max(x),
+                     y = 1.2),
+                 width = 0.05) +
+  geom_text(aes(x = -median(resid_se$x), 
+                y = 1.27, 
+                label = sprintf("%1.2f", abs(diff(resid_se$x)))),
+            size = (5/14) * 20,
+            family = "Liberation") +
+  geom_text(data = labels, 
+            aes(x = x, y = y, label = label, hjust = hjust),
+            size = (5/14) * 28,
+            family = "Liberation",
+            vjust = 0) +
+  xlim(c(-15, 15)) +
+  # facet_grid(.~analyte, 
+  #            scales = "free") +
+  theme_bw(base_size = 36,
+           base_family = "Liberation") +
+  theme(panel.grid.minor = element_blank())  
+
+save_ggplot(filename = "out/figures/density_plot_streamwater_doc_residuals2.png",
+            width = 12, height = 8, antialias = "subpixel", type = "cairo")
 ```
 
-# Introduction
+```{r pre-post-sw-mw-models, warning=FALSE, message=FALSE, ERROR=FALSE, fig.height = 9.75, fig.width = 19.5}
+# Pre-Post SW & MW Models ------------------------------------------------------
+pre_treatment_scaled <- 
+  scaled_samples %>% 
+  filter(treatment_period == "Pre-treatment")
 
-Welcome to `posterdown` ! This is my attempt to provide a semi-smooth workflow for those who wish to take their R Markdown skills to the conference world. Most features from R Markdown are available in this package such as Markdown section notation, figure captioning, and even citations like this one [@R-rmarkdown]. The rest of this example poster will show how you can insert typical conference poster features into your own document. 
+post_treatment_scaled <- 
+  scaled_samples %>% 
+  filter(treatment_period == "Post-treatment")
 
-## Objectives
 
-1. Easy to use reproducible poster design. 
-2. Integration with R Markdown.
-3. Easy transition from `posterdown` to `pagedown` report or manuscript documents [@R-pagedown].
+doc_sw_mod <- 
+  rq(doc_mg_L_FL ~ 0 + doc_scaled_SW*site, 
+     data = pre_treatment_scaled)
 
-# Methods
+doc_mw_mod <- 
+  rq(doc_mg_L_FL ~ 0 + doc_scaled_MW * site, 
+     data = pre_treatment_scaled)
 
-This package uses the same workflow approach as the R Markdown you know and love. Basically it goes from RMarkdown > Knitr > Markdown > Pandoc > HTML/CSS > PDF. You can even use the bibliography the same way [@R-posterdown].
+doc_combined_mod <- 
+  rq(doc_mg_L_FL ~ 0+(doc_scaled_SW*site + doc_scaled_MW)*site, 
+     data = pre_treatment_scaled)
 
-# Results
 
-Usually you want to have a nice table displaying some important results that you have calculated. In `posterdown` this is as easy as using the `kable` table formatting you are probably use to as per typical R Markdown formatting.
+post_sw <- 
+  augment(doc_sw_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Surface Water")
 
-You can reference tables like so: Table \@ref(tab:mytable). Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam placerat augue at velit tincidunt semper. Donec elementum porta posuere. Nullam interdum, odio at tincidunt feugiat, turpis nisi blandit eros, eu posuere risus felis non quam. Nam eget lorem odio. Duis et aliquet orci. Phasellus nec viverra est.
+post_mw <- 
+  augment(doc_mw_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Soil Water")
 
-```{r mytable, out.width='80%'}
-knitr::kable(iris[1:10, 1:4], caption = 'Table caption.',align = 'c',"html")
+post_combined <- 
+  augment(doc_combined_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Surface & Soil Water")
+
+post_predictions <-
+  bind_rows(post_sw, post_mw, post_combined) %>% 
+  mutate(predictor = factor(predictor),
+         predictor = fct_relevel(predictor, 
+                                 "Wetland Surface Water",
+                                 "Wetland Soil Water",
+                                 "Wertland Surface & Soil Water"))
+
+density_labels <- 
+  tibble(predictor = rep(unique(post_predictions$predictor), each = 2),
+         x = c(NA, NA, 10.1, 10.1, NA, NA),
+         y = c(NA, NA, 25, 5, NA, NA),
+         label = c(NA, NA, "Treatment", "Control", NA, NA),
+         hjust = c(NA, NA, 0, 0, NA, NA),
+         x1 = c(NA, NA, 7.5, 25, NA, NA),
+         x2 = c(NA, NA, 10, 22, NA, NA),
+         y1 = c(NA, NA, 10, 21, NA, NA),
+         y2 = c(NA, NA, 5, 25, NA, NA))
+
+ggplot(post_predictions, 
+       aes(x = doc_mg_L_FL, 
+           y = .fitted)) +
+  stat_density_2d(aes(alpha = stat(level),
+                      fill = site),
+                  geom = "polygon", 
+                  color = NA,
+                  show.legend = FALSE) +
+  # guides(alpha = FALSE) +
+  labs(y = expression(Predicted~DOC~(mg~L^{-1})),
+       x = expression(atop(Observed~"Post-Treatment"~Stream~Water~DOC~(mg~L^{-1})))) +
+  geom_abline(slope = 1, intercept = 0) +
+  coord_cartesian(xlim = c(0, 40), ylim = c(0, 40), expand = FALSE) +
+  geom_text(data = density_labels,
+            aes(x = x, y = y, label = label, hjust = hjust),
+            family = "Liberation",
+            size = (5/14)*18) +
+  geom_curve(data = density_labels,
+             aes(x = x1, xend = x2, y = y1, yend = y2),
+             arrow = arrow(length = unit(0.07, "inch")), 
+             size = (5/14)*2,
+             color = "gray20") +
+  geom_rug(aes(color = site), show.legend = FALSE) +
+  scale_fill_manual(name = NULL,
+                    breaks = c("113", "053"),
+                    labels = c("Control", "Treatment"), 
+                    values = c( "#d55e00", "#333333")) +
+  scale_color_manual(name = NULL,
+                    breaks = c("113", "053"),
+                    labels = c("Control", "Treatment"), 
+                    values = c( "#d55e00", "#333333")) +
+  # scale_x_continuous(sec.axis = sec_axis(trans = "identity", name = "Wetland Water Source\n____________________")) +
+  facet_wrap(~predictor, ncol = 3) +
+  theme_bw(base_size = 36,
+           base_family = "Liberation") +
+  theme(legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(size = rel(0.75)),
+        axis.text.x.top = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.title.x.top = element_text(size = rel(0.8),
+                                        lineheight = rel(0.25)))
 ```
 
-Or with figures: Figure \@ref(fig:standard-plot), or Figure \@ref(fig:morefigs).
+```{r quickflow, fig.width = 12, fig.height = 6, error = FALSE, warning=FALSE, message=FALSE}
+# Quickflow Change --------------------------------------------------------
 
-```{r standard-plot, out.width='80%', fig.align='center', fig.cap='Great figure!', fig.height=5}
-plot(mtcars[1:2])
+site_area <- 
+  tribble(~site, ~area_m2,
+          "Treatment", 8200,
+          "Control", 11300)
+
+# Exclude May for risk of snowmelt, and October for water level rebound
+raw_flume <- 
+  read_csv("data/flume_stage.csv",
+           col_types = "cTdddclll") %>% 
+  filter(month(sample_time) %in% c(6:9)) %>% 
+  mutate(field_season = year(sample_time), 
+         sample_date = as_date(sample_time),
+         treatment_period = if_else(sample_time < ymd_hms("2015-03-31 00:00:00"),
+                                    "Pre-treatment",
+                                    "Post-treatment"),
+         treatment_period = as_factor(treatment_period)) %>% 
+  select(site,
+         sample_time,
+         sample_date,
+         field_season,
+         treatment_period,
+         discharge_l_sec)
+
+raw_well <- 
+  read_csv("data/well_levels.csv",
+           col_types = cols_only(site = "c", 
+                                 sample_time = "T", 
+                                 water_level_m = "d")) %>% 
+  filter(site %in% c("053", "113")) %>% 
+  mutate(water_level_cm = water_level_m * 100) %>% 
+  select(-water_level_m)
+
+precip <- 
+  read_csv("data/precip_combined_external_sources.csv") %>% 
+  mutate(site = expand_site(as.character(site)),
+         precip_cm = precip_mm / 10) %>% 
+  select(-input_source,
+         -precip_mm) %>% 
+  filter(year(sample_date) < 2019)
+
+water_bal <- 
+  left_join(raw_flume,
+            raw_well,
+            by = c("site", "sample_time")) %>% 
+  left_join(precip,
+            by = c("site", "sample_date")) %>% 
+  mutate(site = if_else(site == "053",
+                        "Treatment",
+                        "Control"))
+
+daily_water_bal <- 
+  left_join(water_bal,
+            site_area,
+            by = "site") %>% 
+  group_by(site,
+           field_season,
+           sample_date) %>%
+  summarize(treatment_period = unique(treatment_period),
+            water_level_cm = mean(water_level_cm),
+            discharge_cm = 100 * (0.001 * sum(discharge_l_sec) * 900) / unique(area_m2),
+            precip_cm = unique(precip_cm),
+            dry_days = unique(dry_days)) %>% 
+  ungroup()
+
+# Separate Hydrographs 
+
+source("code/baseflow_functions.R")
+
+params <-
+  daily_water_bal %>% 
+  group_by(site,
+           field_season) %>% 
+  mutate(lead_wl = lead(discharge_cm),
+         diff_wl = c(diff(discharge_cm), NA_real_)) %>% 
+  ungroup() %>% 
+  filter(dry_days > 2,
+         lead(precip_cm) == 0,
+         diff_wl < 0,
+         treatment_period == "Pre-treatment") %>% 
+  group_by(site) %>% 
+  mutate(mod = list(rq(lead_wl ~ 0 + discharge_cm,
+                       tau = 0.95))) %>% 
+  mutate(k = map_dbl(mod, ~coef(.x)["discharge_cm"])) %>% 
+  group_by(field_season,
+           add = TRUE) %>% 
+  mutate(bfi_max = baseflow_BFImax(Q = discharge_cm,
+                                   k = unique(k))) %>% 
+  distinct(site,
+           field_season,
+           k,
+           bfi_max) %>% 
+  group_by(site) %>% 
+  summarize(k = unique(k),
+            bfi_max = mean(bfi_max))
+
+separated_q <- 
+  daily_water_bal %>%
+  inner_join(params,
+             by = c("site")) %>% 
+  filter(!is.na(discharge_cm)) %>% 
+  group_split(site,
+              treatment_period) %>% 
+  map_dfr(function(x){
+    
+    q <- x[["discharge_cm"]]
+    k <- unique(x[["k"]])
+    bfi_max <- unique(x[["bfi_max"]])
+    
+    x$bf_lh_cm <- 
+      lyne_hollick(q,
+                   alpha = k)
+    
+    x$qf_lh_cm <- 
+      q - x$bf_lh_cm
+    
+    x$bf_eck_cm <-
+      baseflow_Eckhardt(Q = q,
+                        BFImax = bfi_max,
+                        k = k)
+    
+    x$qf_eck_cm <-
+      q - x$bf_eck_cm
+    
+    x$bf_cm_cm <- 
+      chapman_maxwell(q = q,
+                      k = k,
+                      passes = 1)
+    
+    x$qf_cm_cm <- 
+      q - x$bf_cm_cm
+    
+    x
+  }) %>% 
+  mutate(flow_type = if_else(qf_cm_cm / bf_cm_cm > 1,
+                             "stormflow",
+                             "baseflow"))
+
+quickflow_summary <- 
+  separated_q %>% 
+  group_by(site,
+           field_season) %>% 
+  mutate(annual_precip_cm = sum(precip_cm, na.rm = TRUE)) %>% 
+  group_by(site,
+           treatment_period) %>% 
+  summarize(precip_cm = mean(annual_precip_cm, na.rm = TRUE),
+            qfi_lh = median(qf_lh_cm / discharge_cm, 
+                          na.rm = TRUE),
+            qfi_eck = median(qf_eck_cm / discharge_cm, 
+                           na.rm = TRUE),
+            qfi_cm = median(qf_cm_cm / discharge_cm, 
+                          na.rm = TRUE))
+
+quickflow_summary <- 
+  quickflow_summary %>%
+  arrange(site, desc(treatment_period)) %>% 
+  summarize_at(vars(-treatment_period),
+               ~100 * diff(.) / .[1]) %>% 
+  pivot_longer(-site,
+               names_to = "var") %>% 
+  mutate(var = case_when(var == "precip_cm" ~ "Precipitation",
+                         var == "qfi_lh" ~ "Lyne & Hollick",
+                         var == "qfi_eck" ~ "Eckhardt",
+                         var == "qfi_cm" ~ "Chapman & Maxwell"),
+         var = factor(var,
+                      levels = c("Precipitation",
+                                 "Lyne & Hollick",
+                                 "Chapman & Maxwell",
+                                 "Eckhardt")),
+         label = if_else(var == "Lyne & Hollick",
+                         site,
+                         NA_character_))
+
+ggplot(data = quickflow_summary) + #filter(quickflow_summary, var != "Mean Annual Precipitation")) +
+  geom_col(aes(x = var,
+               y = value,
+               fill = site),
+           show.legend = FALSE,
+           width = 0.75,
+           position = position_dodge2(padding = 0.05)) +
+  geom_text(aes(x = var,
+                 y = -1,
+                 label = label),
+             position = position_dodge2(width = 0.8, padding = 0.1),
+             hjust = 1,
+             angle = 90,
+             vjust = 0.5,
+             label.size = 0,
+             color = "gray15",
+             # fontface = "bold",
+             size = 5/14*22,
+             family = "Liberation") +
+  geom_hline(aes(yintercept = 0),
+             size = rel(1),
+             color = "gray15") +
+  # coord_flip() +
+  scale_fill_manual(values = c( "#d55e00", "#333333")) +
+  # scale_y_continuous(position = "right") +
+  # facet_wrap(~var, 
+  #            nrow = 1,
+  #            scales = "free_y") +
+  labs(y = "Change in Percentage of Water Yield\nas Quickflow Following Treatment",
+       x = NULL) +
+  theme_classic(base_size = 36,
+                base_family = "Liberation") +
+  theme(axis.line.y.left = element_blank(),
+        axis.ticks.y.left = element_blank(),
+        axis.line.x = element_blank(),
+        axis.ticks = element_line(color = "gray15"),
+        axis.ticks.x = element_line(color = "gray15"),
+        panel.grid.major.y = element_line(linetype = "dotted",
+                                          color = "gray25"),
+        strip.text = element_text(face = "italic",
+                                  color = "gray15",
+                                  hjust = 0.05),
+        strip.background = element_rect(color = NA,
+                                        fill = NA))
 ```
 
-```{r morefigs, out.width='80%', echo=TRUE, fig.cap='Amazing, right?!', fig.height=5}
-data <- iris
+```{r wetland-water-levels, fig.width = 13.8, fig.height = 9.2, warning=FALSE, error=FALSE, message = FALSE}
+# Wetland Water Level -----------------------------------------------------
 
-plot(x = data$Sepal.Length, 
-     y = data$Sepal.Width, 
-     col = data$Species,
-     pch = 19, 
-     xlab = "Sepal Length (cm)",
-     ylab = "Sepal Width (cm)")
+wl <- 
+  read_csv("data/well_levels.csv") %>% 
+  filter(site %in% c("053", "113")) %>% 
+  mutate(sample_date = date(sample_time)) %>% 
+  group_by(site, sample_date) %>% 
+  summarize(water_level_m = mean(water_level_m, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(field_season = year(sample_date),
+         treatment_period = set_treatment_period(sample_date),
+         site = ifelse(site == "053", "Treatment", "Control"),
+         axis_value = case_when(site == "053" & treatment_period == "Pre-treatment" ~ 1, 
+                                site == "053" & treatment_period == "Post-treatment" ~ 2, 
+                                site == "113" & treatment_period == "Pre-treatment" ~ 3, 
+                                site == "113" & treatment_period == "Post-treatment" ~ 4))
 
+color_limits <- 
+  max(abs(wl$water_level_m)) * c(-1, 1)
+
+ggplot(data = wl,
+       aes(x = treatment_period,
+           y = water_level_m)) +
+  geom_boxplot(outlier.shape = NA,
+               width = 0.2,
+               fill = NA,
+               position = position_nudge(x = c(0.225, 0.225)),
+               show.legend = FALSE) +
+  geom_point(position = position_jitter(width = 0.1),
+             alpha = 0.4,
+             shape = 19,
+             stroke = 0,
+             size = 5/14*8,
+             show.legend = FALSE) +
+    facet_wrap(~site) +
+  labs(y = "Water Level Relative to Ground (m)",
+       x = NULL) +
+  theme_bw(base_size = 32,
+           base_family = "Liberation") +
+  theme(strip.background = element_blank(),
+        panel.grid.major.x = element_blank())
+
+# pretty_png("out/figures/boxplot_and_jitter_wetland_water_levels.png",
+#            text.scale = 1.4,
+#            {boxplot(water_level_m ~ axis_value,
+#                     data = wl, 
+#                     boxwex = 0.4,
+#                     staplewex = 0,
+#                     outline = FALSE,
+#                     lty = "solid",
+#                     ylab = "",
+#                     xlab = "",
+#                     xaxt = "n",
+#                     family = "Liberation")
+#              title(ylab = "Water Level Relative to Ground (m)",
+#                    family = "Liberation")
+#              axis(1, 
+#                   at = 1:4, 
+#                   labels = c("Pre-Treatment",
+#                              "Post-Treatment",
+#                              "Pre-Treatment",
+#                              "Post-Treatment"),
+#                   tick = FALSE,
+#                   family = "Liberation")
+#              mtext(c("Treatment", "Control"), 
+#                    side = 1, 
+#                    line = 3,
+#                    at = c(1.5, 3.5),
+#                    family = "Liberation",
+#                    cex = 1.4 * 1.2 * 300/72)
+#              points(water_level_m ~ jitter((axis_value - 0.3), amount = 0.1), 
+#                     pch = 20,
+#                     cex = 0.5,
+#                     col = "#00000066",
+#                     data = wl)},
+#            mar = c(5.1, 5.1, 2.1, 1.1),
+#            bty = "l",
+#            lheight = 0.5)
 ```
-
-# Next Steps
-
-Aliquam sed faucibus risus, quis efficitur erat. Vestibulum semper mauris quis tempus eleifend. Aliquam sagittis dictum ipsum, quis viverra ligula eleifend ut. Curabitur sagittis vitae arcu eget faucibus. In non elementum felis. Duis et aliquam nunc. Nunc pulvinar sapien nunc, vel pretium nisi efficitur in. Fusce fringilla maximus leo et maximus. Fusce at ligula laoreet, iaculis mi at, auctor odio. Praesent sed elementum justo. Aenean consectetur risus rhoncus tincidunt efficitur. Praesent dictum mauris at diam maximus maximus [@R-posterdown].
-
-# Conclusion
-
-Try `posterdown` out! Hopefully you like it!
-
-```{r, include=FALSE}
-knitr::write_bib(c('knitr','rmarkdown','posterdown','pagedown'), 'packages.bib')
-```
-
-# References
