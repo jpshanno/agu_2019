@@ -3,7 +3,6 @@ title: Runoff and Stream Water Chemistry Responses to Simulated Emerald Ash Bore
 author:
   - name: Joseph Shannon
     affil: 1
-    # orcid: '0000-0002-0052-9962'
   - name: Kathryn Hofmeister
     affil: 1
   - name: Matthew Van Grinsven
@@ -697,16 +696,17 @@ by snowfall, analyze anion (Cl-, SO42-) concentrations and flourescence
 excitation emission matrices to improve source water separation and understand
 biogeochemical processing.
 
-### Contact
 This poster was generated using the posterdown R package. Code to generate the
 poster can be found on Github   
-Github: github.com/jpshanno/agu_2019  
-Email: jpshanno@mtu.edu   
-Twitter: @jpshanno   
+__Github__: github.com/jpshanno/agu_2019  
+__Email__: jpshanno@mtu.edu   
+__Twitter__: @jpshanno   
 
 <hr width = 80%>
 
-![](Logo_Master.png)
+```{r, out.width="60%", fig.align="center"}
+knitr::include_graphics("Logo_Master.png")
+```
 
 # Content
 ```{r water-levels, fig.height = 11, fig.width = 38}
@@ -900,7 +900,7 @@ gg_qf <-
              vjust = 0.5,
              color = "gray15",
              # fontface = "bold",
-             size = 5/14*28,
+             size = 5/14*32,
              family = "Liberation") +
   geom_hline(aes(yintercept = 0),
              size = rel(1),
@@ -982,7 +982,7 @@ ggplot(data = wl,
                   group = NULL, 
                   color = NULL), 
               show.legend = FALSE,
-              size = (5/14) * 28) +
+              size = (5/14) * 32) +
   labs(y = "Water Level Relative to Ground (m)",
        x = NULL) +
   scale_x_continuous(breaks = 1:4, 
@@ -1150,7 +1150,7 @@ gg_main <-
             family = "Liberation") +
   geom_text(data = labels, 
             aes(x = x, y = y, label = label, hjust = hjust),
-            size = (5/14) * 28,
+            size = (5/14) * 36,
             family = "Liberation",
             vjust = 0) +
   xlim(c(-15, 15)) +
@@ -1278,7 +1278,7 @@ gg_swmw <-
   geom_text(data = density_labels,
             aes(x = x, y = y, label = label, hjust = hjust),
             family = "Liberation",
-            size = (5/14)*28) +
+            size = (5/14)*32) +
   geom_curve(data = density_labels,
              aes(x = x1, xend = x2, y = y1, yend = y2),
              arrow = arrow(length = unit(0.07, "inch")), 
@@ -1347,7 +1347,7 @@ gg_table <-
   geom_raster(aes(fill = site),
               show.legend = FALSE) +
   geom_text(aes(label = value),
-            size = 5/14*28,
+            size = 5/14*30,
             family = "Liberation") +
   scale_fill_manual(values = c("ffffff00", "#bfbfbfCC")) +
   scale_x_discrete(name = "",
