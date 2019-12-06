@@ -3,7 +3,7 @@ title: Runoff and Stream Water Chemistry Responses to Simulated Emerald Ash Bore
 author:
   - name: Joseph Shannon
     affil: 1
-    orcid: '0000-0002-0052-9962'
+    # orcid: '0000-0002-0052-9962'
   - name: Kathryn Hofmeister
     affil: 1
   - name: Matthew Van Grinsven
@@ -20,35 +20,48 @@ affiliation:
   - num: 3
     address: US Forest Service, Northern Research Station
 column_numbers: 3
-poster_width: 48in
-poster_height: 36in
+poster_width: 60in
+poster_height: 48in
 body_textsize: 30pt
-title_textsize: 60pt
-author_textsize: 48pt
-affiliation_textsize: 36pt
-primary_colour: "#4094af"
-major_colour: "#306F83FF"
+title_textsize: 72pt
+author_textsize: 54pt
+affiliation_textsize: 48pt
+primary_colour: "#3085c7"
+major_colour: "#1266A7"
+major_textsize: 64pt
 sectitle_bgcol: "ffffff"
 sectitle_borderwidth: 0mm
 sectitle_textcol: "000000"
 sectitle_align: "left"
-# title_align: "left"
 titlebox_borderheight: 0mm
 major_textcol: "white"
-titlebox_borderwidth: 2%
+titletext_fontfamily: LiberationSansRegular
+font_family: LiberationSansRegular
 # logoright_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
-# logoleft_name: https&#58;//raw.githubusercontent.com/brentthorne/posterdown/master/images/betterhexlogo.png
+logoleft_name: MTU_Logo.png
 output: 
   posterdown::posterdown_hybrid:
-    self_contained: false
+    self_contained: true
+
 # bibliography: packages.bib
 ---
 
+<!-- <img src="wl_rise.png" style="position:absolute; left:50%; top:15%; width:3%; visibility:show"> -->
+
+<!-- <img src="surface_flow.png" style="position:absolute; left:55%; top:15%; width:3%; visibility:show"> -->
+
+<!-- <img src="combined_flow.png" style="position:absolute; left:45%; top:50%; width:3%; visibility:show"> -->
+
 ```{r setup, include=FALSE}
+#     includes: 
+#       in_header: openfont.html
+# writeLines('<link rel="stylesheet" href="https://fontlibrary.org/face/liberation-sans" type="text/css"/>', "openfont.html")
+
 knitr::opts_chunk$set(echo = FALSE,
                       warning = FALSE,
                       message = FALSE,
-                      error = FALSE)
+                      error = FALSE,
+                      cache = TRUE)
 # Packages ----------------------------------------------------------------
 
 suppressPackageStartupMessages({library(agricolae)
@@ -68,8 +81,364 @@ library(patchwork)
 # library(zoo)
 library(ggstance)})
 
+# Theming
+
+col_control <- 
+  "#808080"
+  
+col_posttreatment <- 
+  "#d55e00"
+
+col_pretreatment <- 
+  "#3085c7"
+#col_posttreatment
+
 
 # Define Functions --------------------------------------------------------
+
+
+bfi_index <- 
+  function(q, ...){
+    bfi <- lyne_hollick(q, ...) / q
+    bfi <- replace(bfi,
+                   is.na(bfi),
+                   0)
+    mean(bfi)
+  }
+
+lyne_hollick <- 
+  function(q,
+           alpha = 0.925,
+           reflection = 30,
+           passes = 3){
+    stopifnot(is.numeric(q),
+              is.numeric(alpha),
+              is.numeric(reflection),
+              is.numeric(passes))
+    
+    if(passes %% 2 != 1){
+      stop("passes must be an odd integer.")
+    }
+    
+    if(any(is.na(q))){
+      stop("Currently lyne_hollick() does not support NAs in q")
+    }
+    
+    if(reflection !=0){
+      q_pad <- 
+        c(rev(q[1:reflection]), q, rev(q)[1:reflection])
+    } else {
+      q_pad <- 
+        q
+    }
+    
+    q_f <- 
+      rep(NA_real_, length(q_pad))
+    
+    q_f[1] <-
+      q_pad[1+reflection]
+    
+    q_b <- 
+      q_pad - q_f
+    
+    pass <- 0
+    
+    q_prev <- 
+      q_pad
+    
+    while(pass < passes){
+      for (i in 2:length(q_pad)){
+        
+        q_f[i] <-
+          # lyne_hollick_eq(alpha, q_f, q_prev, i)
+          alpha * q_f[i -1] + ((1 + alpha) / 2) * (q_prev[i] - q_prev[i - 1])
+        
+        if(q_f[i] < 0) q_f[i] <- 0
+        if(q_f[i] > q_prev[i]) q_f[i] <- q_prev[i]
+        
+        q_b[i] <-
+          q_prev[i] - q_f[i]
+      }
+      
+      pass <- 
+        pass + 1
+      
+      if(pass < passes){
+
+        q_prev <- 
+          rev(q_b)
+        
+        q_f[1] <-
+          rev(q_b)[1]
+        
+        q_b[1] <- 
+          q_prev[1] - q_f[1]
+        
+      }
+      
+    }
+    q_b[(reflection + 1):(length(q_b) - reflection)]
+  }
+
+
+chapman_maxwell <- 
+  function(q,
+           k = 0.925,
+           reflection = 30,
+           passes = 3){
+    stopifnot(is.numeric(q),
+              is.numeric(k),
+              is.numeric(reflection),
+              is.numeric(passes))
+    
+    if(passes %% 2 != 1){
+      stop("passes must be an odd integer.")
+    }
+    
+    if(any(is.na(q))){
+      stop("Currently chapman_maxwell() does not support NAs in q")
+    }
+    
+    if(reflection !=0){
+      q_pad <- 
+        c(rev(q[1:reflection]), q, rev(q)[1:reflection])
+    } else {
+      q_pad <- 
+        q
+    }
+    
+    q_b <- 
+      rep(NA_real_, length(q_pad))
+    
+    q_b[1] <-
+      q_pad[1+reflection]
+    
+    pass <- 0
+    
+    q_prev <- 
+      q_pad
+    
+    while(pass < passes){
+      for (i in 2:length(q_pad)){
+        
+        q_b[i] <-
+          (k / (2 - k)) * q_b[i -1] + ((1 - k) / (2 - k)) * q_prev[i]
+        
+        if(q_b[i] < 0) q_b[i] <- 0
+        if(q_b[i] > q_prev[i]) q_b[i] <- q_prev[i]
+      }
+      
+      pass <- 
+        pass + 1
+      
+      if(pass < passes){
+        
+        q_prev <- 
+          rev(q_b)
+        
+        q_b[1] <-
+          rev(q_b)[1]
+
+      }
+      
+    }
+    q_b[(reflection + 1):(length(q_b) - reflection)]
+  }
+
+# S Zipper Functions ------------------------------------------------------
+
+# From Sam Zipper
+# github.com/samzipper/GlobalBaseflow
+## BaseflowSeparationFunctions.R
+#' Script to hold various functions for baseflow separation.
+
+baseflow_Eckhardt <- function(Q, BFImax, k){
+  # R implementation of Eckhardt (2005) baseflow separation algorithm.  
+  #
+  # Inputs:
+  #   Q = discharge timeseries (no missing data) (any units are OK)
+  #   BFImax = maximum allowed value of baseflow index; recommended values are:
+  #      0.8 for perennial stream with porous aquifer
+  #      0.5 for ephemeral stream with porous aquifer
+  #      0.25 for perennial stream with hardrock aquifer
+  #   k = recession constant; this can be estimated with the function baseflow_RecessionConstant.
+  #       
+  # Output:
+  #   bf = baseflow timeseries, same length and units as Q
+  
+  # empty output vector
+  bf <- rep(NaN, length(Q))
+  
+  # fill in initial value
+  bf[1] <- Q[1]*BFImax*0.9  # from Barlow 'Digital Filters' document
+  
+  # scroll through remaining values
+  for (i in 2:length(Q)){
+    # calculate bf using digital filter
+    bf[i] <- (((1-BFImax)*k*bf[i-1]) + ((1-k)*BFImax*Q[i]))/(1-k*BFImax)
+    
+    # make sure 0 <= bf <= Q
+    if (bf[i]<0)    bf[i] <- Q[i]*BFImax*0.9  # from Barlow 'Digital Filters' document
+    if (bf[i]>Q[i]) bf[i] <- Q[i]
+  }
+  
+  return(bf)
+  
+}
+
+# Doesn't work
+baseflow_Eckhardt_vct <- function(Q, BFImax, k){
+  # R implementation of Eckhardt (2005) baseflow separation algorithm.  
+  #
+  # Inputs:
+  #   Q = discharge timeseries (no missing data) (any units are OK)
+  #   BFImax = maximum allowed value of baseflow index; recommended values are:
+  #      0.8 for perennial stream with porous aquifer
+  #      0.5 for ephemeral stream with porous aquifer
+  #      0.25 for perennial stream with hardrock aquifer
+  #   k = recession constant; this can be estimated with the function baseflow_RecessionConstant.
+  #       
+  # Output:
+  #   bf = baseflow timeseries, same length and units as Q
+  
+  # empty output vector
+  bf <- rep(NaN, length(Q))
+  
+  # fill in initial value
+  bf[1] <- Q[1]*BFImax*0.9  # from Barlow 'Digital Filters' document
+  
+  # scroll through remaining values
+    # calculate bf using digital filter
+    bf[2:length(Q)] <- 
+      (((1-BFImax)*k*bf[1:(length(Q)-1)]) + ((1-k)*BFImax*Q[bf[2:length(Q)]]))/(1-k*BFImax)
+    
+    # make sure 0 <= bf <= Q
+    bf <- 
+      replace(bf,
+              bf < 0,
+              Q*BFImax*0.9)
+    
+    bf <- 
+      replace(bf,
+              bf > Q,
+              Q)
+  
+  return(bf)
+  
+}
+
+baseflow_RecessionConstant <- function(Q, UB_prc=0.95, method="Brutsaert", min_pairs=50){
+  # Script to estimate baseflow recession constant.
+  #
+  # Inputs:
+  #   Q = discharge timeseries (no missing data) (any units are OK)
+  #   UB_prc = percentile to use for upper bound of regression
+  #   method = method to use to calculate recession coefficient
+  #     "Langbein" = Langbein (1938) as described in Eckhardt (2008)
+  #     "Brutsaert" = Brutsaert (2008) WRR
+  #   min_pairs = minimum number of date pairs retained after filtering out 
+  #     quickflow events; 50 is from van Dijk (2010) HESS
+  #       
+  # Output:
+  #   k = recession constant
+  
+  ## package dependencies
+  require(quantreg)  # used for quantile regression
+  
+  if (method=="Langbein"){
+    # calculate difference
+    dQ_dt = c(NaN, diff(Q))
+    
+    # find days of five consecutive negative values
+    which_negative <- which(dQ_dt < 0 & Q > 0)
+    which_positive <- which(dQ_dt >= 0)
+    which_positive_with_buffer <- unique(c(which_positive-2, which_positive-1,
+                                           which_positive, 
+                                           which_positive+1, which_positive+2))  # 2 days before and 2 days after a positive or 0 value
+    which_positive_with_buffer <- which_positive_with_buffer[which_positive_with_buffer > 0]  # get rid of negative indices
+    which_keep <- which_negative[!(which_negative %in% which_positive_with_buffer)]  # get rid of points within buffer around flow increases
+    which_keep <- which_keep[(which_keep-1) %in% which_keep]  # trim to dates with both the current and previous day retained
+    
+    # any data exist to fit?
+    if (length(which_keep) >= min_pairs){
+      
+      # fit regression
+      fit.qr <- rq(Q[which_keep] ~ 0+Q[which_keep-1], tau=UB_prc)  # force intercept to go through origin
+      
+      # extract constant
+      k <- as.numeric(coef(fit.qr)[1])
+      
+    } else {
+      k <- NaN
+    }
+    return(k)
+  }
+  
+  if (method=="Brutsaert"){
+    # calculate lagged difference (dQ/dt) based on before/after point
+    dQ_dt <- c(NaN, diff(Q, lag=2)/2, NaN)
+    dQ_dt_left <- c(NaN, diff(Q))
+    
+    # screen data for which dQ_dt to calculate recession, based on rules in Brutsaert (2008) WRR Section 3.2
+    which_negative <- which(dQ_dt < 0 & dQ_dt_left < 0 & Q > 0)
+    which_positive <- which(dQ_dt >= 0)
+    which_positive_with_buffer <- unique(c(which_positive-2, which_positive-1, which_positive,
+                                           which_positive+1, which_positive+2, which_positive+3))  # 2 days before and 3 days after a positive or 0 value
+    which_positive_with_buffer <- which_positive_with_buffer[which_positive_with_buffer > 0]  # get rid of negative indices; possible because of 2 days before
+    which_keep <- which_negative[!(which_negative %in% which_positive_with_buffer)]  # get rid of points within buffer around flow increases
+    which_keep <- which_keep[(which_keep-1) %in% which_keep]  # trim to dates with both the current and previous day retained
+    
+    # any data exist to fit?
+    if (length(which_keep) >= min_pairs){
+      
+      # fit regression
+      fit.qr <- rq(Q[which_keep] ~ 0+Q[which_keep-1], tau=UB_prc)  # force intercept to go through origin
+      
+      # extract constant
+      k <- as.numeric(coef(fit.qr)[1])
+      
+    } else {
+      k <- NaN
+    }
+    return(k)
+  }
+  
+  
+}
+
+baseflow_BFImax <- function(Q, k){
+  # Estimate BFImax parameter for Eckhardt baseflow separation filter
+  # using a backwards-looking filter, based on Collischonn & Fan (2013).
+  #
+  # Inputs:
+  #   Q = discharge timeseries (no missing data) (any units are OK)
+  #   k = recession constant; this can be estimated with the function baseflow_RecessionConstant.
+  #
+  # Outputs:
+  #   BFImax = maximum allowed value of baseflow index; Eckhardt estimates values of:
+  #      0.8 for perennial stream with porous aquifer
+  #      0.5 for ephemeral stream with porous aquifer
+  #      0.25 for perennial stream with hardrock aquifer
+  #    based on a few streams in eastern US
+  
+  # start from end of timeseries
+  bf <- rep(NaN, length(Q))
+  bf[length(Q)] <- Q[length(Q)]
+  for (i in (length(Q)-1):1){
+    if (bf[i+1]==0){
+      bf[i] <- Q[i]
+    } else {
+      bf[i] <- bf[i+1]/k
+    }
+    
+    # make sure bf isn't > Q
+    if (bf[i]>Q[i]) bf[i] <- Q[i]
+  }
+  
+  BFImax <- sum(bf)/sum(Q)
+  return(BFImax)
+  
+}
 
 scale_min_max <- 
   function(x){
@@ -276,8 +645,8 @@ scale_parameters <-
 ```
 #  Major Finding
 Stream water dissolved organic carbon concentrations increased following
-disturbance. Changes were driven by altered surface water concentrations and
-increased water levels.
+disturbance. Changes were driven by increased wetland water levels and a more 
+continuous surface water -- stream water connection. 
 
 # Basic Sections
 
@@ -287,267 +656,60 @@ increased water levels.
 Black ash is a dominant canopy species in northern forested wetlands that is
 threatened by Emerald Ash Borer (EAB), which is continuing to spread into areas
 where black ash is prominent and loss of ash has been shown to affect wetland
-water levels. No work has examined water quality changes following simulation or
-how those changes are telegraphed downstream.
+water levels. No previous work has examined water quality changes following
+simulation or how those changes are telegraphed downstream.
 
 ## Methods
 
 A paired watershed approach has been implemented on the Ottawa National Forest
 in western Michigan (Control: 1.1 ha, 503 m a.s.l.; Treatment: 0.8 ha, 476 m
 a.s.l.). Streamflow monitored in a 6” Parshall flume with a Solinst Levellogger
-Edge and dissolved organic carbon (DOC) and total dissolved nitrogen (TDN) were
-collected by grab and automated sampling and processed on a Shimadzu Total
-Organic Analyzer After 2 years of calibration all ash ≥ 1” dbh were cut and left
-on site in one watershed in March 2015.
+Edge and dissolved organic carbon (DOC) and total dissolved nitrogen (not shown)
+were collected by grab and automated sampling and processed on a Shimadzu Total
+Organic Analyzer. After 2 years of calibration all ash ≥ 1” dbh were cut and
+left on site in one watershed in March 2015.  
+Changes in wetland water levels (Figure 1) were tested using Kruskall-Wallis
+Rank Sum tests. Hydrograph separation (Figure 2) was performed using three
+approaches to allow for sepearate measures of baseflow and quickflow (Lyne &
+Hollick, 1979; Chapman & Maxwell, 1996; and Eckhardt, 2005). Pre-treatment
+models for stream water DOC concentration between sites (Figure 3), and for
+stream water DOC concentration by wetland water source (Figure 4 & Table 1) were
+fit using quantile regression models with $\tau = 0.5$. Quantile regression
+models were to avoid undue outlier influence on model fit and to account for
+unmodeled environmental drivers (Cade & Noon, 2003).
 
 ## Summary Results
 
-During the post-treatment period increased wetland water levels in the Treatment
-watershed led to more continuous surface water runoff, resulting in higher
-baseflow. This is supported by the wetland surface water model at the Treatment
-site, which was the best performing post-treatment predictor of stream DOC. Over
-that same period in the Control watershed baseflow decreased and wetland soil
-water was the best predictor of stream water DOC.
+During the post-treatment period increased wetland water levels in the treatment
+watershed increased relative to pre-treatment conditions. During the same period
+the percent of water yield as baseflow increased relative to the control
+watershed. Increased wetland water levels likely led to a more continuous
+surface water -- stream water connection, resulting in higher baseflow. This is
+supported by the wetland surface water model at the treatment site, which was
+the best performing post-treatment predictor of stream DOC. Over that same
+period in the Control watershed baseflow decreased and wetland soil water was
+the best predictor of stream water DOC.
 
-## Future Results
+## Future Work
 
-Incorporate seasonality as these systems are heavily influenced by snowfall.
-Analyze anion (Cl-, SO42-) concentrations and flourescence excitation emission
-matrices to improve source water separation and understand biogeochemical
-processing
+Future work will incorporate seasonality as these systems are heavily influenced
+by snowfall, analyze anion (Cl-, SO42-) concentrations and flourescence
+excitation emission matrices to improve source water separation and understand
+biogeochemical processing.
+
+### Contact
+This poster was generated using the posterdown R package. Code to generate the
+poster can be found on Github   
+Github: github.com/jpshanno/agu_2019  
+Email: jpshanno@mtu.edu   
+Twitter: @jpshanno   
 
 <hr width = 80%>
-<br>
-<br>
+
+![](Logo_Master.png)
 
 # Content
-<br>
-```{r flume-doc-plot, fig.cap='Great figure!', fig.height=10, fig.width=15, warning=FALSE, error=FALSE}
-# Pre-Post Flume Models ---------------------------------------------------
-
-flumes_wide <- 
-  full_join(fl %>% 
-              filter(site == "113") %>%
-              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
-              rename(doc_113 = doc_mg_L_FL,
-                     tn_113 = tn_mg_L_FL), 
-            fl %>% 
-              filter(site == "053") %>% 
-              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
-              rename(doc_053 = doc_mg_L_FL,
-                     tn_053 = tn_mg_L_FL), 
-            by = "sample_date") %>% 
-  mutate(treatment_period = set_treatment_period(sample_date))
-
-pre_fl <- 
-  flumes_wide %>% 
-  filter(treatment_period == "Pre-treatment")
-
-pre_fl_mods <- 
-  map(c("doc", "tn"),
-      function(analyte){
-        x <- paste0(analyte, "_113")
-        y <- paste0(analyte, "_053")
-        form <-
-          as.formula(paste(y, "~", x))
-        
-        mod <- 
-          rq(form,
-             data = pre_fl,
-             tau = 0.5)
-        
-        mod}) %>% 
-  set_names(c("doc", "tn"))
-
-flumes_wide <- 
-  flumes_wide %>% 
-  mutate(doc_fitted = predict(pre_fl_mods[["doc"]], newdata = .),
-         tn_fitted = predict(pre_fl_mods[["tn"]], newdata = .),
-         doc_resid = doc_fitted - doc_053,
-         tn_resid = tn_fitted - tn_053)
-
-flume_resid <- 
-  flumes_wide %>% 
-  select(sample_date, treatment_period, matches("_resid")) %>% 
-  pivot_longer(matches("_resid"), 
-               names_to = "analyte", 
-               names_pattern = "(doc|tn)",
-               values_to = "resid_mg_L") %>% 
-  mutate(analyte_full = ifelse(str_detect(analyte, "doc"), "Dissolved Organic Carbon", "Total Dissolved Nitrogen"))
-
-resid_se <- 
-  flume_resid %>% 
-  group_by(treatment_period, analyte) %>%
-  filter(!is.na(resid_mg_L)) %>% 
-  summarize(x = median(resid_mg_L),
-            se = sd(resid_mg_L)/sqrt(n()),
-            xmin = x - 1.96*se,
-            xmax = x + 1.96*se,
-            n_samples = n()) %>% 
-  filter(analyte == "doc") %>% 
-  ungroup()
-
-# resid_se %>% 
-#   summarize(median_diff = diff(rev(x)), 
-#             se = combine_se(x, se, n_samples), 
-#             ul = median_diff + se, 
-#             ll = median_diff - se)
-
-labels <- 
-  data.frame(x = c(-3, 2.85),
-             y = c(0.52, 0.75),
-             label = c("Pre-treatment", "Post-treatment"),
-             hjust = c(1, 0))
-
-# MORE DOC LEAVING THAN EXPECTED POST-TREATMENT. If the residuals are negative
-# then the model is UNDERPREDICTING the observed values.
-ggplot(data = flume_resid %>% filter(analyte == "doc")) +
-  geom_density_ridges(aes(x = -resid_mg_L,
-                          fill = treatment_period,
-                          y = 0, 
-                          height = ..scaled..), 
-                      scale = 1, 
-                      stat = "density",
-                      show.legend = FALSE) +
-  scale_fill_manual(name = NULL, 
-                    values = c("#d55e00CC", "#3085c7CC")) +
-  scale_y_continuous(expand = c(0, 0, 0.1, 0)) +
-  labs(x = expression(atop(Observed~minus~Predicted~Dissolved~Organic~Carbon, "in"~Stream~Water~(mg~L^{-1}))),
-       y = "Density (Scaled to 1)") +
-  geom_pointrangeh(data = resid_se,
-                   aes(y = 1.1, 
-                       x = -x,
-                       xmin = -xmin,
-                       xmax = -xmax)) +
-  geom_errorbarh(data = resid_se,
-                 aes(xmin = -min(x),
-                     xmax = -max(x),
-                     y = 1.2),
-                 width = 0.05) +
-  geom_text(aes(x = -median(resid_se$x), 
-                y = 1.27, 
-                label = sprintf("%1.2f", abs(diff(resid_se$x)))),
-            size = (5/14) * 20,
-            family = "Liberation") +
-  geom_text(data = labels, 
-            aes(x = x, y = y, label = label, hjust = hjust),
-            size = (5/14) * 28,
-            family = "Liberation",
-            vjust = 0) +
-  xlim(c(-15, 15)) +
-  # facet_grid(.~analyte, 
-  #            scales = "free") +
-  theme_bw(base_size = 36,
-           base_family = "Liberation") +
-  theme(panel.grid.minor = element_blank())  
-
-save_ggplot(filename = "out/figures/density_plot_streamwater_doc_residuals2.png",
-            width = 12, height = 8, antialias = "subpixel", type = "cairo")
-```
-
-```{r pre-post-sw-mw-models, warning=FALSE, message=FALSE, ERROR=FALSE, fig.height = 9.75, fig.width = 19.5}
-# Pre-Post SW & MW Models ------------------------------------------------------
-pre_treatment_scaled <- 
-  scaled_samples %>% 
-  filter(treatment_period == "Pre-treatment")
-
-post_treatment_scaled <- 
-  scaled_samples %>% 
-  filter(treatment_period == "Post-treatment")
-
-
-doc_sw_mod <- 
-  rq(doc_mg_L_FL ~ 0 + doc_scaled_SW*site, 
-     data = pre_treatment_scaled)
-
-doc_mw_mod <- 
-  rq(doc_mg_L_FL ~ 0 + doc_scaled_MW * site, 
-     data = pre_treatment_scaled)
-
-doc_combined_mod <- 
-  rq(doc_mg_L_FL ~ 0+(doc_scaled_SW*site + doc_scaled_MW)*site, 
-     data = pre_treatment_scaled)
-
-
-post_sw <- 
-  augment(doc_sw_mod, newdata = post_treatment_scaled) %>% 
-  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
-         predictor = "Wetland Surface Water")
-
-post_mw <- 
-  augment(doc_mw_mod, newdata = post_treatment_scaled) %>% 
-  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
-         predictor = "Wetland Soil Water")
-
-post_combined <- 
-  augment(doc_combined_mod, newdata = post_treatment_scaled) %>% 
-  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
-         predictor = "Wetland Surface & Soil Water")
-
-post_predictions <-
-  bind_rows(post_sw, post_mw, post_combined) %>% 
-  mutate(predictor = factor(predictor),
-         predictor = fct_relevel(predictor, 
-                                 "Wetland Surface Water",
-                                 "Wetland Soil Water",
-                                 "Wertland Surface & Soil Water"))
-
-density_labels <- 
-  tibble(predictor = rep(unique(post_predictions$predictor), each = 2),
-         x = c(NA, NA, 10.1, 10.1, NA, NA),
-         y = c(NA, NA, 25, 5, NA, NA),
-         label = c(NA, NA, "Treatment", "Control", NA, NA),
-         hjust = c(NA, NA, 0, 0, NA, NA),
-         x1 = c(NA, NA, 7.5, 25, NA, NA),
-         x2 = c(NA, NA, 10, 22, NA, NA),
-         y1 = c(NA, NA, 10, 21, NA, NA),
-         y2 = c(NA, NA, 5, 25, NA, NA))
-
-ggplot(post_predictions, 
-       aes(x = doc_mg_L_FL, 
-           y = .fitted)) +
-  stat_density_2d(aes(alpha = stat(level),
-                      fill = site),
-                  geom = "polygon", 
-                  color = NA,
-                  show.legend = FALSE) +
-  # guides(alpha = FALSE) +
-  labs(y = expression(Predicted~DOC~(mg~L^{-1})),
-       x = expression(atop(Observed~"Post-Treatment"~Stream~Water~DOC~(mg~L^{-1})))) +
-  geom_abline(slope = 1, intercept = 0) +
-  coord_cartesian(xlim = c(0, 40), ylim = c(0, 40), expand = FALSE) +
-  geom_text(data = density_labels,
-            aes(x = x, y = y, label = label, hjust = hjust),
-            family = "Liberation",
-            size = (5/14)*18) +
-  geom_curve(data = density_labels,
-             aes(x = x1, xend = x2, y = y1, yend = y2),
-             arrow = arrow(length = unit(0.07, "inch")), 
-             size = (5/14)*2,
-             color = "gray20") +
-  geom_rug(aes(color = site), show.legend = FALSE) +
-  scale_fill_manual(name = NULL,
-                    breaks = c("113", "053"),
-                    labels = c("Control", "Treatment"), 
-                    values = c( "#d55e00", "#333333")) +
-  scale_color_manual(name = NULL,
-                    breaks = c("113", "053"),
-                    labels = c("Control", "Treatment"), 
-                    values = c( "#d55e00", "#333333")) +
-  # scale_x_continuous(sec.axis = sec_axis(trans = "identity", name = "Wetland Water Source\n____________________")) +
-  facet_wrap(~predictor, ncol = 3) +
-  theme_bw(base_size = 36,
-           base_family = "Liberation") +
-  theme(legend.position = "bottom",
-        strip.background = element_blank(),
-        strip.text = element_text(size = rel(0.75)),
-        axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank(),
-        axis.title.x.top = element_text(size = rel(0.8),
-                                        lineheight = rel(0.25)))
-```
-
-```{r quickflow, fig.width = 12, fig.height = 6, error = FALSE, warning=FALSE, message=FALSE}
+```{r water-levels, fig.height = 11, fig.width = 38}
 # Quickflow Change --------------------------------------------------------
 
 site_area <- 
@@ -615,8 +777,6 @@ daily_water_bal <-
   ungroup()
 
 # Separate Hydrographs 
-
-source("code/baseflow_functions.R")
 
 params <-
   daily_water_bal %>% 
@@ -710,23 +870,25 @@ quickflow_summary <-
   pivot_longer(-site,
                names_to = "var") %>% 
   mutate(var = case_when(var == "precip_cm" ~ "Precipitation",
-                         var == "qfi_lh" ~ "Lyne & Hollick",
+                         var == "qfi_lh" ~ "L & H",
                          var == "qfi_eck" ~ "Eckhardt",
-                         var == "qfi_cm" ~ "Chapman & Maxwell"),
+                         var == "qfi_cm" ~ "C & M"),
          var = factor(var,
                       levels = c("Precipitation",
-                                 "Lyne & Hollick",
-                                 "Chapman & Maxwell",
+                                 "L & H",
+                                 "C & M",
                                  "Eckhardt")),
          label = if_else(var == "Lyne & Hollick",
                          site,
                          NA_character_))
 
-ggplot(data = quickflow_summary) + #filter(quickflow_summary, var != "Mean Annual Precipitation")) +
+gg_qf <- 
+  ggplot(data = quickflow_summary) + #filter(quickflow_summary, var != "Mean Annual Precipitation")) +
   geom_col(aes(x = var,
                y = value,
                fill = site),
            show.legend = FALSE,
+           alpha = 0.8,
            width = 0.75,
            position = position_dodge2(padding = 0.05)) +
   geom_text(aes(x = var,
@@ -736,16 +898,16 @@ ggplot(data = quickflow_summary) + #filter(quickflow_summary, var != "Mean Annua
              hjust = 1,
              angle = 90,
              vjust = 0.5,
-             label.size = 0,
              color = "gray15",
              # fontface = "bold",
-             size = 5/14*22,
+             size = 5/14*28,
              family = "Liberation") +
   geom_hline(aes(yintercept = 0),
              size = rel(1),
              color = "gray15") +
   # coord_flip() +
-  scale_fill_manual(values = c( "#d55e00", "#333333")) +
+  scale_fill_manual(values = c(col_control, col_posttreatment)) +
+  scale_x_discrete(position = "top") +
   # scale_y_continuous(position = "right") +
   # facet_wrap(~var, 
   #            nrow = 1,
@@ -765,11 +927,8 @@ ggplot(data = quickflow_summary) + #filter(quickflow_summary, var != "Mean Annua
                                   color = "gray15",
                                   hjust = 0.05),
         strip.background = element_rect(color = NA,
-                                        fill = NA))
-```
-
-```{r wetland-water-levels, fig.width = 13.8, fig.height = 9.2, warning=FALSE, error=FALSE, message = FALSE}
-# Wetland Water Level -----------------------------------------------------
+                                        fill = NA),
+        axis.text.x.top = element_text(color = "black"))
 
 wl <- 
   read_csv("data/well_levels.csv") %>% 
@@ -781,35 +940,62 @@ wl <-
   mutate(field_season = year(sample_date),
          treatment_period = set_treatment_period(sample_date),
          site = ifelse(site == "053", "Treatment", "Control"),
-         axis_value = case_when(site == "053" & treatment_period == "Pre-treatment" ~ 1, 
-                                site == "053" & treatment_period == "Post-treatment" ~ 2, 
-                                site == "113" & treatment_period == "Pre-treatment" ~ 3, 
-                                site == "113" & treatment_period == "Post-treatment" ~ 4))
+         group = interaction(site, treatment_period, sep = "-"),
+         group = fct_relevel(group,
+                             "Control-Pre-treatment",
+                             "Control-Post-treatment",
+                             "Treatment-Pre-treatment",
+                             "Treatment-Post-treatment"),
+         axis_value = as.numeric(group))
 
 color_limits <- 
   max(abs(wl$water_level_m)) * c(-1, 1)
 
+
+wl_labels <- 
+  tibble(x = c(1.375, 3.375),
+         y = c(-0.3, -0.6),
+         label = c("Control", "Treatment"))
+
+gg_wl <-
 ggplot(data = wl,
-       aes(x = treatment_period,
-           y = water_level_m)) +
+       aes(x = axis_value,
+           y = water_level_m,
+           group = group,
+           color = group)) +
   geom_boxplot(outlier.shape = NA,
-               width = 0.2,
+               width = 0.4,
                fill = NA,
-               position = position_nudge(x = c(0.225, 0.225)),
+               position = position_nudge(x = 0.2025),
                show.legend = FALSE) +
-  geom_point(position = position_jitter(width = 0.1),
-             alpha = 0.4,
-             shape = 19,
-             stroke = 0,
-             size = 5/14*8,
-             show.legend = FALSE) +
-    facet_wrap(~site) +
+  geom_jitter(aes(x = axis_value - 0.125),
+              width = 0.1,
+              alpha = 0.4,
+              shape = 19,
+              stroke = 0,
+              size = 5/14*8,
+              show.legend = FALSE) +
+    geom_text(data = wl_labels,
+              aes(x = x, 
+                  y = y, 
+                  label = label, 
+                  group = NULL, 
+                  color = NULL), 
+              show.legend = FALSE,
+              size = (5/14) * 28) +
   labs(y = "Water Level Relative to Ground (m)",
        x = NULL) +
-  theme_bw(base_size = 32,
+  scale_x_continuous(breaks = 1:4, 
+                     labels = rep(c("Pre-treatment", "Post-treatment"), 2),
+                     position = "top") +
+  scale_color_manual(values = c(col_control, col_control, col_pretreatment, col_posttreatment)) +
+  theme_bw(base_size = 36,
            base_family = "Liberation") +
   theme(strip.background = element_blank(),
-        panel.grid.major.x = element_blank())
+        panel.grid.major.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.text.x.top = element_text(color = "black"))
 
 # pretty_png("out/figures/boxplot_and_jitter_wetland_water_levels.png",
 #            text.scale = 1.4,
@@ -847,4 +1033,359 @@ ggplot(data = wl,
 #            mar = c(5.1, 5.1, 2.1, 1.1),
 #            bty = "l",
 #            lheight = 0.5)
+
+gg_wl + plot_spacer() + gg_qf + plot_layout(widths = c(4.75, 1, 3.5))
+
+```
+<br>
+<br>
+<br>
+```{r flume-doc-plot, fig.height=14, fig.width=38}
+# Pre-Post Flume Models ---------------------------------------------------
+
+flumes_wide <- 
+  full_join(fl %>% 
+              filter(site == "113") %>%
+              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
+              rename(doc_113 = doc_mg_L_FL,
+                     tn_113 = tn_mg_L_FL), 
+            fl %>% 
+              filter(site == "053") %>% 
+              select(sample_date, doc_mg_L_FL, tn_mg_L_FL) %>% 
+              rename(doc_053 = doc_mg_L_FL,
+                     tn_053 = tn_mg_L_FL), 
+            by = "sample_date") %>% 
+  mutate(treatment_period = set_treatment_period(sample_date))
+
+pre_fl <- 
+  flumes_wide %>% 
+  filter(treatment_period == "Pre-treatment")
+
+pre_fl_mods <- 
+  map(c("doc", "tn"),
+      function(analyte){
+        x <- paste0(analyte, "_113")
+        y <- paste0(analyte, "_053")
+        form <-
+          as.formula(paste(y, "~", x))
+        
+        mod <- 
+          rq(form,
+             data = pre_fl,
+             tau = 0.5)
+        
+        mod}) %>% 
+  set_names(c("doc", "tn"))
+
+flumes_wide <- 
+  flumes_wide %>% 
+  mutate(doc_fitted = predict(pre_fl_mods[["doc"]], newdata = .),
+         tn_fitted = predict(pre_fl_mods[["tn"]], newdata = .),
+         doc_resid = doc_fitted - doc_053,
+         tn_resid = tn_fitted - tn_053)
+
+flume_resid <- 
+  flumes_wide %>% 
+  select(sample_date, treatment_period, matches("_resid")) %>% 
+  pivot_longer(matches("_resid"), 
+               names_to = "analyte", 
+               names_pattern = "(doc|tn)",
+               values_to = "resid_mg_L") %>% 
+  mutate(analyte_full = ifelse(str_detect(analyte, "doc"), "Dissolved Organic Carbon", "Total Dissolved Nitrogen"))
+
+resid_se <- 
+  flume_resid %>% 
+  group_by(treatment_period, analyte) %>%
+  filter(!is.na(resid_mg_L)) %>% 
+  summarize(x = median(resid_mg_L),
+            se = sd(resid_mg_L)/sqrt(n()),
+            xmin = x - 1.96*se,
+            xmax = x + 1.96*se,
+            n_samples = n()) %>% 
+  filter(analyte == "doc") %>% 
+  ungroup()
+
+# resid_se %>% 
+#   summarize(median_diff = diff(rev(x)), 
+#             se = combine_se(x, se, n_samples), 
+#             ul = median_diff + se, 
+#             ll = median_diff - se)
+
+labels <- 
+  data.frame(x = c(-3, 2.85),
+             y = c(0.52, 0.75),
+             label = c("Pre-treatment", "Post-treatment"),
+             hjust = c(1, 0))
+
+# MORE DOC LEAVING THAN EXPECTED POST-TREATMENT. If the residuals are negative
+# then the model is UNDERPREDICTING the observed values.
+gg_main <- 
+  ggplot(data = flume_resid %>% filter(analyte == "doc")) +
+  geom_density_ridges(aes(x = -resid_mg_L,
+                          fill = treatment_period,
+                          y = 0, 
+                          height = ..scaled..), 
+                      scale = 1, 
+                      alpha = 0.8,
+                      stat = "density",
+                      show.legend = FALSE) +
+  scale_fill_manual(name = NULL, 
+                    values = c(col_pretreatment, col_posttreatment)) +
+  labs(x = expression(Observed~minus~Predicted~Dissolved~Organic~Carbon~ "in"~Stream~Water~(mg~L^{-1})),
+       y = "Density (Scaled to 1)") +
+  geom_pointrangeh(data = resid_se,
+                   aes(y = 1.05, 
+                       x = -x,
+                       xmin = -xmin,
+                       xmax = -xmax)) +
+  geom_errorbarh(data = resid_se,
+                 aes(xmin = -min(x),
+                     xmax = -max(x),
+                     y = 1.1),
+                 width = 0.05) +
+  geom_text(aes(x = -median(resid_se$x), 
+                y = 1.15, 
+                label = sprintf("%1.2f", abs(diff(resid_se$x)))),
+            size = (5/14) * 20,
+            family = "Liberation") +
+  geom_text(data = labels, 
+            aes(x = x, y = y, label = label, hjust = hjust),
+            size = (5/14) * 28,
+            family = "Liberation",
+            vjust = 0) +
+  xlim(c(-15, 15)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.25)) +
+  # facet_grid(.~analyte, 
+  #            scales = "free") +
+  theme_bw(base_size = 36,
+           base_family = "Liberation") +
+  theme(panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line())
+
+layout <- 
+"AACCCCCCDD
+BBCCCCCCDD
+BBCCCCCCEE"
+
+wrap_elements(grid::textGrob(str_wrap("Figure 1 (top): Boxplot and jittered observations of daily mean wetland water level relative to the ground surface by treatment period.", width = 30),
+                             x = unit(0, "npc"),
+                             y = unit(1, "npc"),
+                             gp=grid::gpar(fontsize=30, 
+                                           fontfamily = "Liberation"),
+                             just = c("left", "top"))) +
+  grid::textGrob(str_wrap("Figure 4 (bottom): Two-dimensional density plots showing the residuals from quantile regression (τ = 0.5) models predicting streamwater DOC concentrations from wetland surface water, soil water, and both sources. See Table 1 for model and prediction metrics", width = 30),
+                 x = unit(0, "npc"),
+                 y = unit(0, "npc"),
+                 gp=grid::gpar(fontsize=30, 
+                               fontfamily = "Liberation"),
+                 just = c("left", "bottom")) + 
+  gg_main +
+  grid::textGrob(str_wrap("Figure 2 (top): Columns showing the percent change from pre-treatment calibration of the stormflow from each watershed. Stormflow was calculated by Lyne & Hollick (L & H), Chapman & Maxwell (C & M), and Eckhart. Change in mean annual precipiation is also included for context. Filter parameters were estimated from pre-treatment data for both watersheds.", 
+                          width = 30),
+                 x = unit(0, "npc"),
+                 y = unit(1, "npc"),
+                 gp=grid::gpar(fontsize=30, 
+                               fontfamily = "Liberation"),
+                 just = c("left", "top")) +
+  grid::textGrob(str_wrap("Figure 3 (left): Density plots showing the residuals from a quantile regression (τ = 0.5) model predicting treatment watershed DOC concentrations from control watershed DOC concentrations. Model fit to pre-treatment data with RMSE = 3.8, R^2 = 0.77.", width = 30),
+                 x = unit(0, "npc"),
+                 y = unit(0, "npc"),
+                 gp=grid::gpar(fontsize=30, 
+                               fontfamily = "Liberation"),
+                 just = c("left", "bottom")) + 
+  plot_layout(design = layout)
+# save_ggplot(filename = "out/figures/density_plot_streamwater_doc_residuals2.png",
+#             width = 12, height = 8, antialias = "subpixel", type = "cairo")
+```
+<br>
+<br>
+<br>
+```{r mw-sw-plot, fig.width = 38, fig.height = 11}
+
+# Pre-Post SW 24& MW Models ------------------------------------------------------
+pre_treatment_scaled <- 
+  scaled_samples %>% 
+  filter(treatment_period == "Pre-treatment")
+
+post_treatment_scaled <- 
+  scaled_samples %>% 
+  filter(treatment_period == "Post-treatment")
+
+
+doc_sw_mod <- 
+  rq(doc_mg_L_FL ~ 0 + doc_scaled_SW*site, 
+     data = pre_treatment_scaled)
+
+doc_mw_mod <- 
+  rq(doc_mg_L_FL ~ 0 + doc_scaled_MW * site, 
+     data = pre_treatment_scaled)
+
+doc_combined_mod <- 
+  rq(doc_mg_L_FL ~ 0+(doc_scaled_SW*site + doc_scaled_MW)*site, 
+     data = pre_treatment_scaled)
+
+
+post_sw <- 
+  augment(doc_sw_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Surface Water")
+
+post_mw <- 
+  augment(doc_mw_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Soil Water")
+
+post_combined <- 
+  augment(doc_combined_mod, newdata = post_treatment_scaled) %>% 
+  mutate(resid_mg_L = .fitted - doc_mg_L_FL,
+         predictor = "Wetland Surface & Soil Water")
+
+post_predictions <-
+  bind_rows(post_sw, post_mw, post_combined) %>% 
+  mutate(predictor = factor(predictor),
+         predictor = fct_relevel(predictor, 
+                                 "Wetland Surface Water",
+                                 "Wetland Soil Water",
+                                 "Wetland Surface & Soil Water"),
+         Site = ifelse(site == "113", "Control", "Treatment"))
+
+density_labels <- 
+  tibble(predictor = rep(unique(post_predictions$predictor), each = 2),
+         x = c(NA, NA, 9.8, 10.1, NA, NA),
+         y = c(NA, NA, 25, 5, NA, NA),
+         label = c(NA, NA, "Treatment", "Control", NA, NA),
+         hjust = c(NA, NA, 0, 0, NA, NA),
+         x1 = c(NA, NA, 7.5, 25, NA, NA),
+         x2 = c(NA, NA, 10, 22, NA, NA),
+         y1 = c(NA, NA, 10, 21, NA, NA),
+         y2 = c(NA, NA, 5, 25, NA, NA))
+
+gg_swmw <- 
+  ggplot(post_predictions, 
+         aes(x = doc_mg_L_FL, 
+             y = .fitted)) +
+  stat_density_2d(aes(alpha = stat(level),
+                      fill = site),
+                  geom = "polygon", 
+                  color = NA,
+                  show.legend = FALSE) +
+  # guides(alpha = FALSE) +
+  labs(y = expression(Predicted~DOC~(mg~L^{-1})),
+       x = expression(atop(Observed~"Post-Treatment"~Stream~Water~DOC~(mg~L^{-1})))) +
+  geom_abline(slope = 1, intercept = 0) +
+  coord_cartesian(xlim = c(0, 40), ylim = c(0, 40), expand = FALSE) +
+  geom_text(data = density_labels,
+            aes(x = x, y = y, label = label, hjust = hjust),
+            family = "Liberation",
+            size = (5/14)*28) +
+  geom_curve(data = density_labels,
+             aes(x = x1, xend = x2, y = y1, yend = y2),
+             arrow = arrow(length = unit(0.07, "inch")), 
+             size = (5/14)*4,
+             color = "gray20") +
+  geom_rug(aes(color = site), show.legend = FALSE) +
+  scale_fill_manual(values = c(col_posttreatment, col_control)) +
+  scale_color_manual(values = c(col_posttreatment, col_control)) +
+  # scale_x_continuous(sec.axis = sec_axis(trans = "identity", name = "Wetland Water Source\n____________________")) +
+  facet_wrap(~predictor, ncol = 3) +
+  theme_bw(base_size = 36,
+           base_family = "Liberation") +
+  theme(legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(size = rel(0.75)),
+        axis.text.x.top = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.title.x.top = element_text(size = rel(0.8),
+                                        lineheight = rel(0.25)))
+
+
+mod_table <- 
+  inner_join(tibble(predictor = unique(post_predictions$predictor),
+                    mod = list(augment(doc_sw_mod), augment(doc_mw_mod), augment(doc_combined_mod))) %>% 
+               unnest(mod) %>% 
+               group_by(predictor, site) %>% 
+               summarize(RMSE = sqrt(mean((.fitted - doc_mg_L_FL)^2, na.rm = TRUE)),
+                         `R^2` = cor(.fitted, doc_mg_L_FL)^2),
+             post_predictions %>% 
+               group_by(predictor, site) %>% 
+               summarize(`Prediction\nRMSE` = sqrt(mean((.fitted - doc_mg_L_FL)^2, na.rm = TRUE)),
+                         `Median\nPrediction\nError` = median(.fitted - doc_mg_L_FL, na.rm = TRUE)),
+             by = c("predictor", "site")) %>% 
+  ungroup() %>% 
+  mutate_if(is.numeric,
+            ~sprintf("% 1.2f", .))
+
+
+mod_table <-
+  mod_table %>%
+  mutate(yaxe = interaction(predictor, site, sep = "-"),
+         Site = ifelse(site == "113", "Control", "Treatment")) %>%
+  select(-predictor) %>%
+  pivot_longer(cols = c(-yaxe, -site),
+               names_to = "metric") %>%
+  mutate(metric = as_factor(metric),
+         metric = fct_relevel(metric,
+                              "Site",
+                              "RMSE",
+                              "R^2",
+                              "Prediction\nRMSE",
+                              "Median\nPrediction\nError"),
+         yaxe = fct_relevel(yaxe,
+                            "Wetland Surface & Soil Water-053",
+                            "Wetland Surface & Soil Water-113",
+                            "Wetland Soil Water-053",
+                            "Wetland Soil Water-113",
+                            "Wetland Surface Water-053",
+                            "Wetland Surface Water-113"))
+
+
+gg_table <-
+  ggplot(data = mod_table,
+         aes(x = metric,
+             y = yaxe)) +
+  geom_raster(aes(fill = site),
+              show.legend = FALSE) +
+  geom_text(aes(label = value),
+            size = 5/14*28,
+            family = "Liberation") +
+  scale_fill_manual(values = c("ffffff00", "#bfbfbfCC")) +
+  scale_x_discrete(name = "",
+                   position = "top") +
+  scale_y_discrete(name = "",
+                   labels = function(x){str_wrap(str_replace_all(x,
+                                                                 c(".*053" = "",
+                                                                   "(.*)-113" = "\\1")),
+                                                 width = 10)}) +
+  theme_minimal(base_family = "Liberation",
+                base_size = 30) +
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_text(color = "black"))
+
+# 
+# table_grob <-
+#   mod_table %>% 
+#   mutate(predictor = str_wrap(as.character(predictor), 10),
+#          predictor = c(predictor[1], "", predictor[3], " ", predictor[5], "  "), 
+#          site = ifelse(site == "113", "Control", "Treatment")) %>% column_to_rownames("predictor")
+
+layout <- 
+"AAAAAABBB
+AAAAAACCC
+AAAAAACCC
+AAAAAACCC
+AAAAAACCC"
+
+gg_swmw + 
+  grid::textGrob(str_wrap("Table 1: Model fit and prediction metrics for surface water, soil water, and combined driver models.", width = 60),
+                 x = unit(0, "npc"),
+                 y = unit(0, "npc"),
+                 gp=grid::gpar(fontsize=30, 
+                               fontfamily = "Liberation"),
+                 just = c("left", "bottom")) +
+  gg_table +
+  # gridExtra::tableGrob(table_grob, 
+  #                      theme = gridExtra::ttheme_default(base_size = 36, base_family = "Liberation",
+  #                                                        padding = unit(c(1,1), "mm"))) +
+  plot_layout(design = layout)
 ```
