@@ -41,7 +41,7 @@ contact_info: <i class="fab fa-github" style="color:white;"></i> github.com/jpsh
 logoleft_name: MTU_Logo.png
 output: 
   posterdown::posterdown_hybrid:
-    self_contained: true
+    self_contained: true  
     pandoc_args: --mathjax
 bibliography: references.bib
 nocite: |
@@ -1243,7 +1243,7 @@ post_predictions <-
 
 density_labels <- 
   tibble(predictor = rep(unique(post_predictions$predictor), each = 2),
-         x = c(NA, NA, 9.3, 10.1, NA, NA),
+         x = c(NA, NA, 7.5, 11, NA, NA),
          y = c(NA, NA, 25, 5, NA, NA),
          label = c(NA, NA, "Treatment", "Control", NA, NA),
          hjust = c(NA, NA, 0, 0, NA, NA),
