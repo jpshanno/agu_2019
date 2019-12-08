@@ -41,8 +41,11 @@ contact_info: <i class="fab fa-github" style="color:white;"></i> github.com/jpsh
 logoleft_name: MTU_Logo.png
 output: 
   posterdown::posterdown_hybrid:
-    self_contained: false
+    self_contained: true
+    pandoc_args: --mathjax
 bibliography: references.bib
+nocite: |
+  @thorne-2019
 ---
 
 ```{r setup, include=FALSE}
@@ -656,19 +659,19 @@ simulation or how those changes are telegraphed downstream.
 
 A paired watershed approach has been implemented on the Ottawa National Forest
 in western Michigan (Control: 1.1 ha, 503 m a.s.l.; Treatment: 0.8 ha, 476 m
-a.s.l.). Streamflow monitored in a 6” Parshall flume with a Solinst Levellogger
-Edge and dissolved organic carbon (DOC) and total dissolved nitrogen (not shown)
-were collected by grab and automated sampling and processed on a Shimadzu Total
-Organic Analyzer. After 2 years of calibration all ash ≥ 1” dbh were cut and
-left on site in one watershed in March 2015.  
-Changes in wetland water levels (Figure 1) were tested using Kruskall-Wallis
-Rank Sum tests. Hydrograph separation (Figure 2) was performed using three
-approaches to allow for sepearate measures of baseflow and quickflow (@lyne-1979;
+a.s.l.). Streamflow was monitored in a 6” Parshall flume with a Solinst
+Levellogger Edge and dissolved organic carbon (DOC) and total dissolved nitrogen
+(not shown) were collected by grab and automated sampling and processed on a
+Shimadzu Total Organic Analyzer. After 2 years of calibration all ash ≥ 1” dbh
+were cut and left on site in one watershed in March 2015. Changes in wetland
+water levels (Figure 1) were tested using Kruskall-Wallis Rank Sum tests.
+Hydrograph separation (Figure 2) was performed using three approaches to allow
+for sepearate measures of baseflow and quickflow (@lyne-1979;
 @chapman-1996; and @eckhart-2005). Pre-treatment models for stream water DOC
 concentration between sites (Figure 3), and for stream water DOC concentration
 by wetland water source (Figure 4 & Table 1) were fit using quantile regression
-models with $\tau = 0.5$. Quantile regression models were to avoid undue outlier
-influence on model fit and to account for unmodeled environmental drivers
+models with $\tau = 0.5$. Quantile regression models avoid undue outlier
+influence on model fit and account for unmodeled environmental drivers
 [@cade-2003].
 
 ## Summary Results
@@ -679,29 +682,25 @@ percent of water yield as baseflow increased relative to the control watershed.
 Increased wetland water levels likely led to a more continuous surface water --
 stream water connection, resulting in higher baseflow. This is supported by the
 wetland surface water model at the treatment site, which was the best performing
-post-treatment predictor of stream DOC. Over that same period in the Control
+post-treatment predictor of stream DOC. Over that same period in the control
 watershed baseflow decreased and wetland soil water was the best predictor of
 stream water DOC.
 
 ## Future Work
 
 Future work will incorporate seasonality as these systems are heavily influenced
-by snowfall, analyze anion (Cl-, SO42-) concentrations and flourescence
+by snowfall, and analyze anion (Cl-, SO42-) concentrations and flourescence
 excitation emission matrices to improve source water separation and understand
 biogeochemical processing.
 
-
-_This poster was generated using the posterdown R package [@thorne-2019]. Code to generate the
-poster can be found on Github   _
-
 <hr width = 80%>
-
-```{r, out.width="100%", fig.align="center"}
-knitr::include_graphics("Logo_Master.png")
-```
+<div width = 100%>
+<img src = Logo_Master_Portrait.png style = "width:40%; float:left"></img>
+<div id="refs" class = "references" style = "width:58%; float:right"></div>
+</div>
 
 # Content
-```{r water-levels, fig.height = 11, fig.width = 38}
+```{r water-levels, fig.height = 10.75, fig.width = 38}
 # Quickflow Change --------------------------------------------------------
 
 site_area <- 
@@ -1138,7 +1137,7 @@ gg_main <-
   geom_text(aes(x = -median(resid_se$x), 
                 y = 1.15, 
                 label = sprintf("%1.2f", abs(diff(resid_se$x)))),
-            size = (5/14) * 20,
+            size = (5/14) * 26,
             family = "Liberation") +
   geom_text(data = labels, 
             aes(x = x, y = y, label = label, hjust = hjust),
@@ -1166,21 +1165,21 @@ wrap_elements(grid::textGrob(str_wrap("Figure 1 (top): Boxplot and jittered obse
                              gp=grid::gpar(fontsize=30, 
                                            fontfamily = "Liberation"),
                              just = c("left", "top"))) +
-  grid::textGrob(str_wrap("Figure 4 (bottom): Two-dimensional density plots showing the residuals from quantile regression (τ = 0.5) models predicting streamwater DOC concentrations from wetland surface water, soil water, and both sources. See Table 1 for model and prediction metrics", width = 30),
+  grid::textGrob(str_wrap("Figure 4 (bottom): Two-dimensional density plots showing the residuals from quantile regression (τ = 0.5) models predicting streamwater DOC concentration from wetland surface water, soil water, and both sources. See Table 1 for model and prediction metrics", width = 30),
                  x = unit(0, "npc"),
-                 y = unit(0, "npc"),
+                 y = unit(0.05, "npc"),
                  gp=grid::gpar(fontsize=30, 
                                fontfamily = "Liberation"),
                  just = c("left", "bottom")) + 
   gg_main +
-  grid::textGrob(str_wrap("Figure 2 (top): Columns showing the percent change from pre-treatment calibration of the stormflow from each watershed. Stormflow was calculated by Lyne & Hollick (L & H), Chapman & Maxwell (C & M), and Eckhart. Change in mean annual precipiation is also included for context. Filter parameters were estimated from pre-treatment data for both watersheds.", 
+  grid::textGrob(str_wrap("Figure 2 (top): Columns showing the percent change from pre-treatment calibration of the stormflow from each watershed. Stormflow was calculated by Lyne & Hollick (L & H), Chapman & Maxwell (C & M), and Eckhart. Change in mean annual precipiation is included for context. Filter parameters were estimated from pre-treatment data for both watersheds.", 
                           width = 30),
                  x = unit(0, "npc"),
                  y = unit(1, "npc"),
                  gp=grid::gpar(fontsize=30, 
                                fontfamily = "Liberation"),
                  just = c("left", "top")) +
-  grid::textGrob(str_wrap("Figure 3 (left): Density plots showing the residuals from a quantile regression (τ = 0.5) model predicting treatment watershed DOC concentrations from control watershed DOC concentrations. Model fit to pre-treatment data with RMSE = 3.8, R^2 = 0.77.", width = 30),
+  grid::textGrob(str_wrap("Figure 3 (left): Density plots showing the residuals from a quantile regression (τ = 0.5) model predicting treatment watershed DOC concentration from control watershed DOC concentration. Model fit to pre-treatment data with RMSE = 3.8, R^2 = 0.77.", width = 30),
                  x = unit(0, "npc"),
                  y = unit(0, "npc"),
                  gp=grid::gpar(fontsize=30, 
@@ -1193,7 +1192,7 @@ wrap_elements(grid::textGrob(str_wrap("Figure 1 (top): Boxplot and jittered obse
 <br>
 <br>
 <br>
-```{r mw-sw-plot, fig.width = 38, fig.height = 11}
+```{r mw-sw-plot, fig.width = 38, fig.height = 10.75}
 
 # Pre-Post SW 24& MW Models ------------------------------------------------------
 pre_treatment_scaled <- 
@@ -1244,7 +1243,7 @@ post_predictions <-
 
 density_labels <- 
   tibble(predictor = rep(unique(post_predictions$predictor), each = 2),
-         x = c(NA, NA, 9.8, 10.1, NA, NA),
+         x = c(NA, NA, 9.3, 10.1, NA, NA),
          y = c(NA, NA, 25, 5, NA, NA),
          label = c(NA, NA, "Treatment", "Control", NA, NA),
          hjust = c(NA, NA, 0, 0, NA, NA),
@@ -1370,7 +1369,7 @@ AAAAAACCC"
 
 gg_swmw + 
   grid::textGrob(str_wrap("Table 1: Model fit and prediction metrics for surface water, soil water, and combined driver models.", width = 60),
-                 x = unit(0, "npc"),
+                 x = unit(0.05, "npc"),
                  y = unit(0, "npc"),
                  gp=grid::gpar(fontsize=30, 
                                fontfamily = "Liberation"),
